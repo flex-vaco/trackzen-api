@@ -1,0 +1,364 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// SHARED MODELS
+// ─────────────────────────────────────────
+
+model Organisation {
+  id        Int      @id @default(autoincrement())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  projects      Project[]
+  timesheets    Timesheet[]
+  holidays      Holiday[]
+  settings      OrgSettings?
+  leaveTypes    LeaveType[]
+  leaveRequests LeaveRequest[]
+}
+
+model OrgSettings {
+  id             Int @id @default(autoincrement())
+  organisationId Int @unique
+
+  // TMS settings
+  workWeekStart   String  @default("monday")
+  standardHours   Float   @default(8.0)
+  timeFormat      String  @default("decimal")
+  timeIncrement   Int     @default(30)
+  maxHoursPerDay  Float   @default(24.0)
+  maxHoursPerWeek Float   @default(60.0)
+  requireApproval Boolean @default(true)
+  allowBackdated  Boolean @default(true)
+  enableOvertime  Boolean @default(true)
+  mandatoryDesc   Boolean @default(false)
+  allowCopyWeek   Boolean @default(true)
+  dailyReminderTime String?
+  weeklyDeadline    String?
+
+  // LMS settings
+  leaveRequireApproval Boolean @default(true)
+  leaveAllowBackdated  Boolean @default(false)
+  accrualEnabled       Boolean @default(true)
+  carryForwardEnabled  Boolean @default(true)
+  carryForwardMaxDays  Float   @default(10.0)
+  leaveApprovalLevels  Int     @default(1)
+
+  // SSO settings
+  ssoGoogleEnabled    Boolean @default(false)
+  ssoMicrosoftEnabled Boolean @default(false)
+
+  // Integration placeholders
+  payrollType String?
+  pmType      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+}
+
+model User {
+  id             Int       @id @default(autoincrement())
+  organisationId Int
+  name           String
+  email          String    @unique
+  passwordHash   String?
+  role           UserRole  @default(EMPLOYEE)
+  department     String?
+  employeeType   String    @default("FULL_TIME") // FULL_TIME, CONTRACTUAL, CONSULTANT, TRAINEE
+  joiningDate    DateTime?
+  status         String    @default("active")
+  refreshToken   String?   @db.Text
+  oauthProvider  String?
+  oauthId        String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([oauthProvider, oauthId])
+
+  organisation       Organisation      @relation(fields: [organisationId], references: [id])
+  timesheets         Timesheet[]
+  timesheetApprovals Timesheet[]       @relation("TimesheetApprovedBy")
+  notifications      Notification[]
+  leaveRequests      LeaveRequest[]
+  leaveApprovals     LeaveApproval[]
+  leaveBalances      LeaveBalance[]
+
+  managedEmployees ManagerEmployee[] @relation("ManagedEmployees")
+  managers         ManagerEmployee[] @relation("Managers")
+  managedProjects  ProjectManager[]  @relation("ManagedProjects")
+  assignedProjects ProjectEmployee[] @relation("AssignedProjects")
+}
+
+enum UserRole {
+  EMPLOYEE
+  MANAGER
+  ADMIN
+}
+
+model ManagerEmployee {
+  id         Int      @id @default(autoincrement())
+  managerId  Int
+  employeeId Int
+  createdAt  DateTime @default(now())
+
+  manager  User @relation("ManagedEmployees", fields: [managerId], references: [id])
+  employee User @relation("Managers", fields: [employeeId], references: [id])
+
+  @@unique([managerId, employeeId])
+  @@index([managerId])
+  @@index([employeeId])
+}
+
+model Holiday {
+  id             Int      @id @default(autoincrement())
+  organisationId Int
+  name           String
+  date           DateTime
+  recurring      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  type      String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ─────────────────────────────────────────
+// TMS MODELS
+// ─────────────────────────────────────────
+
+model Project {
+  id             Int      @id @default(autoincrement())
+  organisationId Int
+  code           String
+  name           String
+  client         String
+  budgetHours    Float    @default(0)
+  usedHours      Float    @default(0)
+  status         String   @default("active")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation      Organisation    @relation(fields: [organisationId], references: [id])
+  timeEntries       TimeEntry[]
+  managers          ProjectManager[]
+  assignedEmployees ProjectEmployee[]
+
+  @@unique([organisationId, code])
+}
+
+model ProjectManager {
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  managerId Int
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  manager User    @relation("ManagedProjects", fields: [managerId], references: [id])
+
+  @@unique([projectId, managerId])
+  @@index([projectId])
+  @@index([managerId])
+}
+
+model ProjectEmployee {
+  id         Int      @id @default(autoincrement())
+  projectId  Int
+  employeeId Int
+  createdAt  DateTime @default(now())
+
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employee User    @relation("AssignedProjects", fields: [employeeId], references: [id])
+
+  @@unique([projectId, employeeId])
+  @@index([projectId])
+  @@index([employeeId])
+}
+
+model Timesheet {
+  id             Int             @id @default(autoincrement())
+  organisationId Int
+  userId         Int
+  weekStartDate  DateTime
+  weekEndDate    DateTime
+  status         TimesheetStatus @default(DRAFT)
+  totalHours     Float           @default(0)
+  billableHours  Float           @default(0)
+  approvedById   Int?
+  approvedAt     DateTime?
+  rejectedReason String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+  approvedBy   User?        @relation("TimesheetApprovedBy", fields: [approvedById], references: [id])
+  timeEntries  TimeEntry[]
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+model TimeEntry {
+  id          Int     @id @default(autoincrement())
+  timesheetId Int
+  projectId   Int
+  billable    Boolean @default(true)
+
+  monHours   Float   @default(0)
+  monDesc    String? @db.Text
+  monTimeOff Float   @default(0)
+
+  tueHours   Float   @default(0)
+  tueDesc    String? @db.Text
+  tueTimeOff Float   @default(0)
+
+  wedHours   Float   @default(0)
+  wedDesc    String? @db.Text
+  wedTimeOff Float   @default(0)
+
+  thuHours   Float   @default(0)
+  thuDesc    String? @db.Text
+  thuTimeOff Float   @default(0)
+
+  friHours   Float   @default(0)
+  friDesc    String? @db.Text
+  friTimeOff Float   @default(0)
+
+  satHours   Float   @default(0)
+  satDesc    String? @db.Text
+  satTimeOff Float   @default(0)
+
+  sunHours   Float   @default(0)
+  sunDesc    String? @db.Text
+  sunTimeOff Float   @default(0)
+
+  totalHours Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  timesheet Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id])
+}
+
+// ─────────────────────────────────────────
+// LMS MODELS
+// ─────────────────────────────────────────
+
+model LeaveType {
+  id             Int      @id @default(autoincrement())
+  organisationId Int
+  name           String
+  annualQuota    Float    @default(20)
+  accrualRate    Float    @default(0)       // monthly accrual amount (e.g., 1.25 for Earned Leave)
+  creditSchedule String   @default("ANNUAL") // ANNUAL, BIANNUAL, MONTHLY
+  carryForward   Boolean  @default(true)
+  maxCarryForward Float   @default(0)       // max days that can be carried forward (0 = use org setting)
+  maxEncashment  Float    @default(0)       // max days that can be encashed at year end
+  requiresDoc    Boolean  @default(false)
+  requiresDocAfterDays Int @default(0)      // require doc after N consecutive days (0 = always if requiresDoc)
+  paid           Boolean  @default(true)
+  eligibleTypes  String   @default("ALL")   // ALL, FULL_TIME, CONTRACTUAL, etc. Comma-separated
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation  Organisation   @relation(fields: [organisationId], references: [id])
+  leaveRequests LeaveRequest[]
+  leaveBalances LeaveBalance[]
+}
+
+model LeaveBalance {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  leaveTypeId   Int
+  year          Int
+  allocatedDays Float    @default(0)
+  usedDays      Float    @default(0)
+  pendingDays   Float    @default(0)
+  carriedOver   Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id])
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([userId, leaveTypeId, year])
+  @@index([userId])
+}
+
+model LeaveRequest {
+  id             Int         @id @default(autoincrement())
+  organisationId Int
+  userId         Int
+  leaveTypeId    Int
+  startDate      DateTime
+  endDate        DateTime
+  businessDays   Float
+  reason         String?     @db.Text
+  status         LeaveStatus @default(PENDING)
+  cancelledAt    DateTime?
+  cancelReason   String?     @db.Text
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organisation Organisation   @relation(fields: [organisationId], references: [id])
+  user         User           @relation(fields: [userId], references: [id])
+  leaveType    LeaveType      @relation(fields: [leaveTypeId], references: [id])
+  approvals    LeaveApproval[]
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model LeaveApproval {
+  id             Int            @id @default(autoincrement())
+  leaveRequestId Int
+  approverId     Int
+  level          Int            @default(1)
+  status         ApprovalStatus @default(PENDING)
+  comment        String?        @db.Text
+  actionDate     DateTime?
+  createdAt      DateTime       @default(now())
+
+  leaveRequest LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
+  approver     User         @relation(fields: [approverId], references: [id])
+
+  @@unique([leaveRequestId, level])
+  @@index([leaveRequestId])
+  @@index([approverId])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}

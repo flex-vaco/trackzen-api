@@ -1,0 +1,26 @@
+  Infrastructure
+
+  - Docker Compose (MySQL + API + Web) + dev override
+  - TypeScript strict mode — zero errors on both projects
+
+  Next steps to run:
+
+  cd api && cp .env.example .env  # configure secrets
+  docker compose up mysql -d       # start MySQL
+  npm run prisma:migrate           # run migrations
+  npm run prisma:seed              # seed data
+  npm run dev                      # start API on :3001
+
+  cd ../web && npm run dev         # start frontend on :5173
+
+  Login: admin@acme.com / Password123!
+
+
+    7 tests failed when playwright e2e test was run 
+    [chromium] › e2e/04-leave-employee.spec.ts:25:3 › Leave Management — Employee › shows Casual Leave balance (if balances exist)
+    [chromium] › e2e/04-leave-employee.spec.ts:40:3 › Leave Management — Employee › shows Sick / Medical Leave balance (if balances exist)
+    [chromium] › e2e/05-approvals-manager.spec.ts:23:5 › Approvals — Manager › Timesheet Approvals › lists submitted timesheets from direct reports
+    [chromium] › e2e/06-reports-manager.spec.ts:22:3 › Reports & Exports — Manager › displays aggregated data (total hours, billable hours)
+    [chromium] › e2e/06-reports-manager.spec.ts:28:3 › Reports & Exports — Manager › export buttons are visible (CSV, Excel, PDF)
+    [chromium] › e2e/06-reports-manager.spec.ts:73:3 › Team Calendar — Manager › shows month navigation
+    [chromium] › e2e/07-admin.spec.ts:193:5 › Administration — Admin Only › Leave Types Tab › shows list of leave types
