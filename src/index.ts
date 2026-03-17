@@ -50,11 +50,11 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/holidays', holidayRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
-app.use('/api/v1/leave', leaveRoutes);
 app.use('/api/v1/leave/approvals', leaveApprovalRoutes);
 app.use('/api/v1/leave/types', leaveTypeRoutes);
 app.use('/api/v1/leave/balances', leaveBalanceRoutes);
 app.use('/api/v1/leave/calendar', leaveCalendarRoutes);
+app.use('/api/v1/leave', leaveRoutes);
 app.use('/api/v1/reports', reportRoutes);
 
 // Error handler (must be last)
