@@ -57,9 +57,15 @@ export const exportMonthly = tryCatch(async (req: Request, res: Response) => {
     targetUserId,
     req.user.orgId,
     targetYear,
-    targetMonth
+    targetMonth,
+    req.user.userId,
+    req.user.role,
   );
 
-  const filename = `monthly-timesheet-${data.userName.replace(/\s+/g, '-')}-${targetYear}-${String(targetMonth).padStart(2, '0')}.xlsx`;
-  await generateMonthlyTimesheetExcel(res, data, filename);
+  const filename = `timesheet-${data.employeeName.replace(/\s+/g, '-').toLowerCase()}-${data.month.replace("'", '')}.xlsx`;
+  const buffer = await generateMonthlyTimesheetExcel(data);
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+  res.send(buffer);
 });

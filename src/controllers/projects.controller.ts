@@ -47,3 +47,15 @@ export const remove = tryCatch(async (req: Request, res: Response) => {
 
   res.json({ success: true, data: null });
 });
+
+export const assignEmployees = tryCatch(async (req: Request, res: Response) => {
+  const { userId, orgId, role } = req.user;
+  const projectId = Number(req.params.id);
+  const { employeeIds } = req.body;
+
+  const project = await projectsService.assignProjectEmployees(
+    projectId, orgId, userId, role, employeeIds,
+  );
+
+  res.json({ success: true, data: project });
+});

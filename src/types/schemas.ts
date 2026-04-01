@@ -215,3 +215,7 @@ export const approveLeaveSchema = z.object({
 export const assignManagersSchema = z.object({
   managerIds: z.array(z.number().int().positive()),
 });
+
+export const assignProjectEmployeesSchema = z.object({
+  employeeIds: z.array(z.number().int().nonnegative()),
+});

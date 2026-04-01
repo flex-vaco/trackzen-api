@@ -186,6 +186,60 @@ export async function updateProject(
 }
 
 // ---------------------------------------------------------------------------
+// ASSIGN employees to project (manager restricted to their direct reports)
+// ---------------------------------------------------------------------------
+
+export async function assignProjectEmployees(
+  projectId: number,
+  orgId: number,
+  requestingUserId: number,
+  requestingUserRole: UserRole,
+  employeeIds: number[],
+) {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, organisationId: orgId },
+  });
+  if (!project) throw AppError.notFound('Project not found');
+
+  if (requestingUserRole === 'MANAGER' && employeeIds.length > 0) {
+    const reports = await prisma.managerEmployee.findMany({
+      where: { managerId: requestingUserId },
+      select: { employeeId: true },
+    });
+    const reportIds = new Set(reports.map((r) => r.employeeId));
+    for (const eid of employeeIds) {
+      if (!reportIds.has(eid)) {
+        throw AppError.forbidden(
+          `Employee ${eid} is not one of your direct reports`,
+          ERROR_CODES.FORBIDDEN,
+        );
+      }
+    }
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.projectEmployee.deleteMany({ where: { projectId } });
+    if (employeeIds.length > 0) {
+      await tx.projectEmployee.createMany({
+        data: employeeIds.map((employeeId) => ({ projectId, employeeId })),
+      });
+    }
+    return tx.project.findFirst({
+      where: { id: projectId },
+      include: {
+        managers: { include: { manager: { select: { id: true, name: true, email: true } } } },
+        assignedEmployees: {
+          include: { employee: { select: { id: true, name: true, email: true } } },
+        },
+      },
+    });
+  });
+
+  logger.info({ projectId, employeeIds, orgId }, 'Project employees assigned');
+  return updated;
+}
+
+// ---------------------------------------------------------------------------
 // DELETE project
 // ---------------------------------------------------------------------------
 

@@ -137,76 +137,180 @@ export async function streamPDF(res: Response, rows: ReportRow[], filename: stri
   }
 }
 
-export async function generateMonthlyTimesheetExcel(
-  res: Response,
-  data: {
-    userName: string;
-    year: number;
-    month: number;
-    entries: {
-      date: string;
-      day: string;
-      projectName: string;
-      hours: number;
-      overtime: number;
-      timeOff: number;
-      isHoliday: boolean;
-    }[];
-  },
-  filename: string
-): Promise<void> {
-  try {
-    const ExcelJS = await import('exceljs');
-    const workbook = new ExcelJS.default.Workbook();
-    const sheet = workbook.addWorksheet('Monthly Timesheet');
+export interface MonthlyDayRow {
+  date: string;
+  day: string;
+  project: string;
+  task: string;
+  time: number;
+  overtime: number;
+  totalTime: number;
+  timeOffHours: number;
+  isHoliday: boolean;
+  holidayName?: string;
+  isLeave: boolean;
+  isWeekend: boolean;
+}
 
-    // Title
-    sheet.mergeCells('A1:G1');
-    const titleCell = sheet.getCell('A1');
-    titleCell.value = `Monthly Timesheet — ${data.userName}`;
-    titleCell.font = { bold: true, size: 14, color: { argb: 'FF2C5F7C' } };
+export interface MonthlyTimesheetData {
+  employeeName: string;
+  employeeId: number;
+  department: string;
+  month: string;       // e.g. "Dec'25"
+  monthFull: string;   // e.g. "December 2025"
+  days: MonthlyDayRow[];
+  totalHours: number;
+  totalOvertime: number;
+  holidayCount: number;
+  leaveCount: number;
+}
 
-    sheet.mergeCells('A2:G2');
-    sheet.getCell('A2').value = `${data.year}-${String(data.month).padStart(2, '0')}`;
+const ORANGE_HEADER = 'FFE8A44C';
+const HOLIDAY_RED = 'FFFF4444';
+const HOLIDAY_BG = 'FFFFE0E0';
+const LEAVE_YELLOW = 'FFFFFF00';
+const LEAVE_BG = 'FFFFFFCC';
+const WEEKEND_BG = 'FFF0F0F0';
 
-    sheet.addRow([]);
+const thinBorder = {
+  top: { style: 'thin' as const },
+  left: { style: 'thin' as const },
+  bottom: { style: 'thin' as const },
+  right: { style: 'thin' as const },
+};
 
-    sheet.columns = [
-      { header: 'Date', key: 'date', width: 15 },
-      { header: 'Day', key: 'day', width: 12 },
-      { header: 'Project', key: 'project', width: 25 },
-      { header: 'Hours', key: 'hours', width: 10 },
-      { header: 'Overtime', key: 'overtime', width: 10 },
-      { header: 'Time Off', key: 'timeOff', width: 10 },
-      { header: 'Holiday', key: 'holiday', width: 10 },
-    ];
+export async function generateMonthlyTimesheetExcel(data: MonthlyTimesheetData): Promise<Buffer> {
+  const ExcelJS = await import('exceljs');
+  const workbook = new ExcelJS.default.Workbook();
+  const sheet = workbook.addWorksheet('Timesheet');
 
-    const headerRow = sheet.getRow(4);
-    headerRow.values = ['Date', 'Day', 'Project', 'Hours', 'Overtime', 'Time Off', 'Holiday'];
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2C5F7C' } };
+  sheet.getColumn('A').width = 10;
+  sheet.getColumn('B').width = 12;
+  sheet.getColumn('C').width = 28;
+  sheet.getColumn('D').width = 40;
+  sheet.getColumn('E').width = 10;
+  sheet.getColumn('F').width = 10;
+  sheet.getColumn('G').width = 12;
 
-    for (const entry of data.entries) {
-      const row = sheet.addRow({
-        date: entry.date,
-        day: entry.day,
-        project: entry.projectName,
-        hours: entry.hours,
-        overtime: entry.overtime,
-        timeOff: entry.timeOff,
-        holiday: entry.isHoliday ? 'Yes' : '',
-      });
+  // Row 1: Name / Emp Code / Process
+  const r1 = sheet.getRow(1);
+  r1.getCell('A').value = 'Name -';
+  r1.getCell('A').font = { bold: true, size: 10 };
+  r1.getCell('B').value = data.employeeName;
+  r1.getCell('B').font = { bold: true, size: 10 };
+  r1.getCell('D').value = 'Emp Code';
+  r1.getCell('D').font = { bold: true, size: 10 };
+  r1.getCell('E').value = `EMP${String(data.employeeId).padStart(4, '0')}`;
+  r1.getCell('E').font = { size: 10 };
+  r1.getCell('F').value = 'Process';
+  r1.getCell('F').font = { bold: true, size: 10 };
+  r1.getCell('G').value = data.department || 'General';
+  r1.getCell('G').font = { size: 10 };
 
-      if (entry.isHoliday) {
-        row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
+  // Row 2: Month
+  const r2 = sheet.getRow(2);
+  r2.getCell('A').value = 'Month -';
+  r2.getCell('A').font = { bold: true, size: 10 };
+  r2.getCell('B').value = data.month;
+  r2.getCell('B').font = { bold: true, size: 10 };
+
+  // Row 4: Column headers
+  const hdr = sheet.getRow(4);
+  const headers = ['Date', 'Day', 'Project / BD Lead / Others activity', 'Task', 'Time', 'Over time', 'Total Time'];
+  headers.forEach((label, i) => {
+    const cell = hdr.getCell(i + 1);
+    cell.value = label;
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ORANGE_HEADER } };
+    cell.border = thinBorder;
+    cell.alignment = { horizontal: i >= 4 ? 'center' : 'left', vertical: 'middle' };
+  });
+
+  // Day rows
+  let rowNum = 5;
+  for (const day of data.days) {
+    const row = sheet.getRow(rowNum);
+
+    row.getCell('A').value = day.date;
+    row.getCell('B').value = day.day;
+    row.getCell('C').value = day.project;
+
+    if (day.isHoliday) {
+      row.getCell('D').value = `Holiday - ${day.holidayName ?? 'Holiday'}`;
+    } else if (day.isLeave) {
+      row.getCell('D').value = 'Leave';
+    } else {
+      row.getCell('D').value = day.task;
+    }
+
+    row.getCell('E').value = day.isLeave ? (day.timeOffHours || '') : (day.time || '');
+    row.getCell('E').alignment = { horizontal: 'center' };
+    row.getCell('F').value = day.overtime || '';
+    row.getCell('F').alignment = { horizontal: 'center' };
+    row.getCell('G').value = day.totalTime || '';
+    row.getCell('G').alignment = { horizontal: 'center' };
+
+    const bgColor = day.isHoliday ? HOLIDAY_BG : day.isLeave ? LEAVE_BG : day.isWeekend ? WEEKEND_BG : undefined;
+
+    for (let col = 1; col <= 7; col++) {
+      const cell = row.getCell(col);
+      cell.border = thinBorder;
+      cell.font = { size: 10 };
+      if (bgColor) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
       }
     }
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    await workbook.xlsx.write(res);
-    res.end();
-  } catch {
-    res.status(500).json({ success: false, error: 'Export failed', code: 'INTERNAL_ERROR' });
+    if (day.isHoliday) {
+      row.getCell('D').font = { bold: true, color: { argb: HOLIDAY_RED }, size: 10 };
+    } else if (day.isLeave) {
+      row.getCell('D').font = { bold: true, size: 10 };
+      row.getCell('D').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LEAVE_YELLOW } };
+    }
+
+    rowNum++;
   }
+
+  // Summary rows
+  const totalRow = sheet.getRow(rowNum);
+  totalRow.getCell('A').value = 'Total Working Hours';
+  totalRow.getCell('A').font = { bold: true, size: 10 };
+  sheet.mergeCells(`A${rowNum}:D${rowNum}`);
+  totalRow.getCell('E').value = data.totalHours;
+  totalRow.getCell('E').alignment = { horizontal: 'center' };
+  totalRow.getCell('F').value = data.totalOvertime;
+  totalRow.getCell('F').alignment = { horizontal: 'center' };
+  totalRow.getCell('G').value = data.totalHours + data.totalOvertime;
+  totalRow.getCell('G').alignment = { horizontal: 'center' };
+  for (let col = 1; col <= 7; col++) {
+    const cell = totalRow.getCell(col);
+    cell.border = thinBorder;
+    cell.font = { bold: true, size: 10 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ORANGE_HEADER } };
+  }
+
+  rowNum++;
+  const holidayRow = sheet.getRow(rowNum);
+  sheet.mergeCells(`A${rowNum}:F${rowNum}`);
+  holidayRow.getCell('A').value = 'Holiday';
+  holidayRow.getCell('A').font = { bold: true, size: 10 };
+  holidayRow.getCell('A').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HOLIDAY_BG } };
+  holidayRow.getCell('G').value = data.holidayCount;
+  holidayRow.getCell('G').alignment = { horizontal: 'center' };
+  holidayRow.getCell('G').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HOLIDAY_BG } };
+  for (let col = 1; col <= 7; col++) holidayRow.getCell(col).border = thinBorder;
+
+  rowNum++;
+  const leaveRow = sheet.getRow(rowNum);
+  sheet.mergeCells(`A${rowNum}:F${rowNum}`);
+  leaveRow.getCell('A').value = 'Leave';
+  leaveRow.getCell('A').font = { bold: true, size: 10 };
+  leaveRow.getCell('A').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LEAVE_BG } };
+  leaveRow.getCell('G').value = data.leaveCount;
+  leaveRow.getCell('G').alignment = { horizontal: 'center' };
+  leaveRow.getCell('G').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LEAVE_BG } };
+  for (let col = 1; col <= 7; col++) leaveRow.getCell(col).border = thinBorder;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
 }
