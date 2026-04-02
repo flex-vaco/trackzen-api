@@ -28,6 +28,11 @@ export async function listProjects(
     baseWhere.assignedEmployees = { some: { employeeId: userId } };
   }
 
+  // MANAGER: only projects they own
+  if (role === 'MANAGER') {
+    baseWhere.managers = { some: { managerId: userId } };
+  }
+
   const [data, total] = await Promise.all([
     prisma.project.findMany({
       where: baseWhere,
@@ -80,6 +85,14 @@ export async function getProject(
     }
   }
 
+  // MANAGER must own the project
+  if (role === 'MANAGER') {
+    const isOwner = project.managers.some((pm) => pm.managerId === userId);
+    if (!isOwner) {
+      throw AppError.forbidden('You are not a manager of this project', ERROR_CODES.FORBIDDEN);
+    }
+  }
+
   return project;
 }
 
@@ -129,12 +142,22 @@ export async function createProject(orgId: number, input: CreateProjectInput) {
 export async function updateProject(
   projectId: number,
   orgId: number,
+  userId: number,
+  role: UserRole,
   input: Partial<CreateProjectInput> & { status?: string },
 ) {
   const project = await prisma.project.findFirst({
     where: { id: projectId, organisationId: orgId },
+    include: { managers: { select: { managerId: true } } },
   });
   if (!project) throw AppError.notFound('Project not found');
+
+  if (role === 'MANAGER') {
+    const isOwner = project.managers.some((pm) => pm.managerId === userId);
+    if (!isOwner) {
+      throw AppError.forbidden('You are not a manager of this project', ERROR_CODES.FORBIDDEN);
+    }
+  }
 
   const { managerIds, employeeIds, ...updateData } = input;
 
@@ -243,11 +266,24 @@ export async function assignProjectEmployees(
 // DELETE project
 // ---------------------------------------------------------------------------
 
-export async function deleteProject(projectId: number, orgId: number) {
+export async function deleteProject(
+  projectId: number,
+  orgId: number,
+  userId: number,
+  role: UserRole,
+) {
   const project = await prisma.project.findFirst({
     where: { id: projectId, organisationId: orgId },
+    include: { managers: { select: { managerId: true } } },
   });
   if (!project) throw AppError.notFound('Project not found');
+
+  if (role === 'MANAGER') {
+    const isOwner = project.managers.some((pm) => pm.managerId === userId);
+    if (!isOwner) {
+      throw AppError.forbidden('You are not a manager of this project', ERROR_CODES.FORBIDDEN);
+    }
+  }
 
   await prisma.project.delete({ where: { id: projectId } });
   logger.info({ projectId, orgId }, 'Project deleted');

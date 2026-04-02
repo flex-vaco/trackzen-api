@@ -31,19 +31,19 @@ export const create = tryCatch(async (req: Request, res: Response) => {
 });
 
 export const update = tryCatch(async (req: Request, res: Response) => {
-  const { orgId } = req.user;
+  const { userId, orgId, role } = req.user;
   const projectId = Number(req.params.id);
 
-  const project = await projectsService.updateProject(projectId, orgId, req.body);
+  const project = await projectsService.updateProject(projectId, orgId, userId, role, req.body);
 
   res.json({ success: true, data: project });
 });
 
 export const remove = tryCatch(async (req: Request, res: Response) => {
-  const { orgId } = req.user;
+  const { userId, orgId, role } = req.user;
   const projectId = Number(req.params.id);
 
-  await projectsService.deleteProject(projectId, orgId);
+  await projectsService.deleteProject(projectId, orgId, userId, role);
 
   res.json({ success: true, data: null });
 });
